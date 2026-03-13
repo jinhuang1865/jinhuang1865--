@@ -228,7 +228,7 @@ with tab2:
                 key="download_template_btn"
             )
 
-# ---------- 上传名单标签页（核心解决重复提交+空文字问题） ----------
+# ---------- 上传名单标签页（核心解决重复提交+空文字问题，修复continue语法错误） ----------
 with tab3:
     st.header("📤 上传名单")
     templates = get_template_files()
@@ -259,7 +259,7 @@ with tab3:
                     if len(df_upload) == 0:
                         st.warning("⚠️ 上传文件无有效数据（全为空白/空行），请检查后重新上传")
                         st.session_state.uploaded_file_key = current_file_key
-                        continue
+                        pass  # 修复：将continue改为pass，避免语法错误
                     
                     # 检查缺失字段
                     missing_cols = []
@@ -282,31 +282,33 @@ with tab3:
                         st.error(f"❌ 下拉选项验证失败：{'; '.join(invalid_options)}")
                         st.info("💡 请确保所有值均来自模板定义的下拉列表")
                     else:
-                        st.success("✅ 下拉选项验证通过！")
-                        # 添加系统元数据列
-                        df_upload["模板名称"] = selected_template
-                        df_upload["提交时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        
-                        # 读取本地已有数据，合并并去重
-                        df_existing = pd.read_csv(DATA_FILE, encoding="utf-8-sig")
-                        df_combined = pd.concat([df_existing, df_upload], ignore_index=True)
-                        # 按工号/姓名去重（保留最新提交）
-                        if "工号" in df_combined.columns:
-                            df_combined = df_combined.drop_duplicates(subset=["工号"], keep="last")
-                        elif "姓名" in df_combined.columns:
-                            df_combined = df_combined.drop_duplicates(subset=["姓名"], keep="last")
-                        
-                        # 仅保存一次合并后的数据（解决重复写入）
-                        df_combined.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
-                        # 执行本地CSV备份
-                        backup_to_local_csv(df_combined)
-                        # 执行GitHub备份
-                        with st.spinner("🔄 正在备份到GitHub..."):
-                            backup_to_github()
-                        
-                        st.balloons()
-                        st.success(f"✅ 数据提交成功！共导入 {len(df_upload)} 条有效记录")
-                        st.dataframe(df_upload.head(10), use_container_width=True)  # 仅展示本次上传数据，避免重复展示
+                        # 仅当有有效数据时才执行后续逻辑
+                        if len(df_upload) > 0:
+                            st.success("✅ 下拉选项验证通过！")
+                            # 添加系统元数据列
+                            df_upload["模板名称"] = selected_template
+                            df_upload["提交时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            
+                            # 读取本地已有数据，合并并去重
+                            df_existing = pd.read_csv(DATA_FILE, encoding="utf-8-sig")
+                            df_combined = pd.concat([df_existing, df_upload], ignore_index=True)
+                            # 按工号/姓名去重（保留最新提交）
+                            if "工号" in df_combined.columns:
+                                df_combined = df_combined.drop_duplicates(subset=["工号"], keep="last")
+                            elif "姓名" in df_combined.columns:
+                                df_combined = df_combined.drop_duplicates(subset=["姓名"], keep="last")
+                            
+                            # 仅保存一次合并后的数据（解决重复写入）
+                            df_combined.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
+                            # 执行本地CSV备份
+                            backup_to_local_csv(df_combined)
+                            # 执行GitHub备份
+                            with st.spinner("🔄 正在备份到GitHub..."):
+                                backup_to_github()
+                            
+                            st.balloons()
+                            st.success(f"✅ 数据提交成功！共导入 {len(df_upload)} 条有效记录")
+                            st.dataframe(df_upload.head(10), use_container_width=True)  # 仅展示本次上传数据，避免重复展示
                     
                     # 更新session_state，标记当前文件已处理
                     st.session_state.uploaded_file_key = current_file_key
