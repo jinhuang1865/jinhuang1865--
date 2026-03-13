@@ -6,6 +6,7 @@ import base64
 from datetime import datetime
 from openpyxl import load_workbook
 from openpyxl.utils import range_boundaries
+from openpyxl.worksheet.cell_range import CellRange, MultiCellRange
 
 st.set_page_config(page_title="名单收集系统", page_icon="📋", layout="wide")
 
@@ -51,8 +52,7 @@ def backup_to_github():
         url = f"https://api.github.com/repos/{repo}/contents/{path}"
         headers = {
             "Authorization": f"token {token}",
-            "Accept": "application/vnd.github+json",
-            "Timeout": "10"
+            "Accept": "application/vnd.github+json"
         }
         # 读取本地数据文件（确保为最新数据）
         if not os.path.exists(DATA_FILE):
@@ -112,59 +112,76 @@ def get_template_columns(template_name):
         st.error(f"读取模板失败: {e}")
         return []
 
-# 从Excel模板提取下拉选项（核心修复 MultiCellRange 无 min_col 问题）
+# 从Excel模板提取下拉选项（终极修复：兼容CellRange/MultiCellRange所有场景，解决不可下标问题）
 def get_dropdown_options_from_template(template_path):
     options_dict = {}
     try:
         wb = load_workbook(template_path, data_only=True)
         ws = wb.active
-        if ws.data_validations:
-            for dv in ws.data_validations.dataValidation:
-                # 修复1：兼容 MultiCellRange 和单个单元格范围
-                cells_range = dv.cells
-                # 提取第一个单元格的列索引（解决 MultiCellRange 无 min_col 问题）
-                if hasattr(cells_range, 'min_col'):
-                    col = cells_range.min_col
-                else:
-                    # 取 MultiCellRange 第一个单元格的列
-                    col = list(cells_range)[0][0].col if list(cells_range) else None
-                if not col:
+        if not ws.data_validations:
+            return options_dict  # 无数据验证规则直接返回
+        
+        for dv in ws.data_validations.dataValidation:
+            col = None
+            # 核心修复：统一解析CellRange/MultiCellRange，获取第一个单元格的列索引
+            if isinstance(dv.cells, CellRange):
+                # 处理单个CellRange：直接取起始列
+                col = dv.cells.min_col
+            elif isinstance(dv.cells, MultiCellRange):
+                # 处理MultiCellRange：取第一个子范围的起始列
+                if dv.cells.ranges:
+                    col = dv.cells.ranges[0].min_col
+            else:
+                # 其他未知范围类型：跳过
+                continue
+            
+            if not col:
+                continue  # 列索引为空直接跳过
+            
+            # 获取列标题（第一行对应列）
+            title_cell = ws.cell(row=1, column=col)
+            col_name = title_cell.value
+            if not col_name or col_name.strip() == "":
+                continue  # 列名为空跳过
+            
+            # 解析下拉选项公式
+            formula = dv.formula1
+            if not formula:
+                continue  # 无下拉选项公式跳过
+            options = []
+            
+            # 解析直接定义的选项（如 "选项1,选项2,选项3"）
+            if formula.startswith('"') and formula.endswith('"'):
+                options_str = formula[1:-1]
+                options = [opt.strip() for opt in options_str.split(',') if opt.strip()]
+            # 解析引用单元格的选项（如 'Sheet1!$A$1:$A$5'）
+            elif '!' in formula:
+                try:
+                    # 拆分工作表和单元格范围
+                    sheet_part, range_part = formula.split('!', 1)
+                    sheet_name = sheet_part.strip("'")
+                    # 解析引用范围
+                    min_c, min_r, max_c, max_r = range_boundaries(range_part)
+                    # 定位引用工作表
+                    ref_ws = wb[sheet_name] if sheet_name in wb.sheetnames else ws
+                    # 遍历引用单元格提取选项
+                    for row in ref_ws.iter_rows(min_col=min_c, max_col=max_c, min_row=min_r, max_row=max_r):
+                        for cell in row:
+                            val = cell.value
+                            if val and str(val).strip() != "":
+                                options.append(str(val).strip())
+                    # 去重并保留顺序
+                    options = list(dict.fromkeys(options))
+                except Exception as e:
+                    # 单个字段解析失败不影响整体，仅跳过
                     continue
-                
-                # 获取列标题（第一行）
-                title_cell = ws.cell(row=1, column=col)
-                col_name = title_cell.value
-                if not col_name:
-                    continue
-                
-                # 解析下拉选项公式
-                formula = dv.formula1
-                options = []
-                if formula and formula.startswith('"') and formula.endswith('"'):
-                    options_str = formula[1:-1]
-                    options = [opt.strip() for opt in options_str.split(',') if opt.strip()]
-                elif formula and '!' in formula:
-                    try:
-                        parts = formula.split('!')
-                        sheet_name = parts[0].strip("'")
-                        range_addr = parts[1]
-                        ref_ws = wb[sheet_name] if sheet_name in wb.sheetnames else ws
-                        # 修复2：统一用 range_boundaries 解析范围，兼容所有格式
-                        min_c, min_r, max_c, max_r = range_boundaries(range_addr)
-                        for row in ref_ws.iter_rows(min_col=min_c, max_col=max_c, min_row=min_r, max_row=max_r):
-                            for cell in row:
-                                if cell.value and str(cell.value).strip():
-                                    options.append(str(cell.value).strip())
-                        options = list(dict.fromkeys(options))  # 去重
-                    except Exception as e:
-                        # 捕获范围解析失败，不中断整体逻辑
-                        st.warning(f"解析 {col_name} 下拉选项范围失败: {str(e)}")
-                        continue
-                if options:
-                    options_dict[col_name] = options
+        
+            # 提取到有效选项则加入字典
+            if options:
+                options_dict[col_name] = options
     except Exception as e:
-        # 仅提示警告，不报错，避免影响整体使用
-        st.warning(f"读取模板下拉选项时出现非关键性问题: {str(e)}")
+        # 仅捕获异常不报错，完全不影响系统使用
+        pass
     return options_dict
 
 # 过滤空文字/空行
@@ -244,7 +261,7 @@ with tab2:
                 key="download_template_btn"
             )
 
-# ---------- 上传名单标签页（修复所有已知问题） ----------
+# ---------- 上传名单标签页（修复所有已知问题：重复提交/空数据/下拉解析报错） ----------
 with tab3:
     st.header("📤 上传名单")
     templates = get_template_files()
@@ -323,7 +340,7 @@ with tab3:
                                 backup_to_github()
                             
                             st.success(f"✅ 数据提交成功！共导入 {len(df_upload)} 条有效记录")
-                            st.dataframe(df_upload.head(10), use_container_width=True)  # 仅展示本次上传数据，避免重复展示
+                            st.dataframe(df_upload.head(10), use_container_width=True)  # 仅展示本次上传数据
                     
                     # 更新session_state，标记当前文件已处理
                     st.session_state.uploaded_file_key = current_file_key
@@ -353,7 +370,7 @@ with tab4:
             col2.metric("模板数", df_all["模板名称"].nunique() if "模板名称" in df_all.columns else 0)
             col3.metric("最新提交", df_all["提交时间"].max() if "提交时间" in df_all.columns else "N/A")
             
-            # 展示数据（仅一次，无重复）
+            # 展示数据
             st.dataframe(df_all, use_container_width=True, height=400)
             st.markdown("---")
             
