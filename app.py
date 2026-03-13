@@ -151,6 +151,16 @@ def get_dropdown_options_from_template(template_path):
         st.error(f"读取模板下拉选项失败: {e}")
     return options_dict
 
+# 过滤空文字/空行（核心修正）
+def clean_empty_data(df):
+    # 去除全空行
+    df = df.dropna(how='all')
+    # 去除单元格仅含空格的行
+    df = df[df.apply(lambda row: row.astype(str).str.strip().any(), axis=1)]
+    # 重置索引
+    df = df.reset_index(drop=True)
+    return df
+
 # 主页面标题
 st.title("📋 名单收集系统")
 st.markdown("---")
@@ -218,7 +228,7 @@ with tab2:
                 key="download_template_btn"
             )
 
-# ---------- 上传名单标签页（核心解决重复提交问题） ----------
+# ---------- 上传名单标签页（核心解决重复提交+空文字问题） ----------
 with tab3:
     st.header("📤 上传名单")
     templates = get_template_files()
@@ -244,6 +254,13 @@ with tab3:
             if st.session_state.uploaded_file_key != current_file_key:
                 try:
                     df_upload = pd.read_excel(uploaded_file)
+                    # 过滤空文字/空行
+                    df_upload = clean_empty_data(df_upload)
+                    if len(df_upload) == 0:
+                        st.warning("⚠️ 上传文件无有效数据（全为空白/空行），请检查后重新上传")
+                        st.session_state.uploaded_file_key = current_file_key
+                        continue
+                    
                     # 检查缺失字段
                     missing_cols = []
                     if template_cols:
