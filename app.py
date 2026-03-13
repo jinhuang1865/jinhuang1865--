@@ -9,10 +9,8 @@ from openpyxl import Workbook
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
 
-# 页面配置
 st.set_page_config(page_title="名单收集系统", page_icon="📋", layout="wide")
 
-# 路径配置
 DATA_DIR = "data"
 TEMPLATES_DIR = "templates"
 DROPDOWN_CONFIG_FILE = "templates/dropdown_config.json"
@@ -21,29 +19,21 @@ BACKUP_CSV_FILE = "data/backup_submissions.csv"
 
 EXPORT_PASSWORD = "907"
 
-# GitHub仓库
 GITHUB_REPO = "jinhuang1865/jinhuang1865--"
 
-# 创建目录
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
 
-# 初始化CSV
 if not os.path.exists(DATA_FILE):
     df = pd.DataFrame(columns=["提交时间", "模板名称"])
     df.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
 
-# -----------------------------
-# 本地备份
-# -----------------------------
+
 def backup_to_local_csv(df):
     df.to_csv(BACKUP_CSV_FILE, index=False, encoding="utf-8-sig")
     return True
 
 
-# -----------------------------
-# GitHub API备份
-# -----------------------------
 def backup_to_github():
 
     try:
@@ -94,9 +84,6 @@ def backup_to_github():
         return False
 
 
-# -----------------------------
-# 配置加载
-# -----------------------------
 def load_dropdown_config():
     if os.path.exists(DROPDOWN_CONFIG_FILE):
         with open(DROPDOWN_CONFIG_FILE, 'r', encoding='utf-8') as f:
@@ -109,9 +96,6 @@ def save_dropdown_config(config):
         json.dump(config, f, ensure_ascii=False, indent=2)
 
 
-# -----------------------------
-# 模板函数
-# -----------------------------
 def get_template_files():
     templates = []
     for f in os.listdir(TEMPLATES_DIR):
@@ -180,9 +164,6 @@ def create_excel_with_dropdown(columns, dropdown_config, filename):
     wb.save(filename)
 
 
-# -----------------------------
-# 页面
-# -----------------------------
 st.title("📋 名单收集系统")
 st.markdown("---")
 
@@ -195,14 +176,11 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 
-# -----------------------------
-# 模板管理
-# -----------------------------
 with tab1:
 
     st.header("模板管理")
 
-    admin_password = st.text_input("密码", type="password")
+    admin_password = st.text_input("密码", type="password", key="tab1_password")
 
     if admin_password != EXPORT_PASSWORD:
 
@@ -212,14 +190,15 @@ with tab1:
 
         new_template_file = st.file_uploader(
             "上传模板",
-            type=["xlsx", "xls"]
+            type=["xlsx", "xls"],
+            key="upload_template"
         )
 
         if new_template_file:
 
-            template_name = st.text_input("模板名称")
+            template_name = st.text_input("模板名称", key="template_name")
 
-            if st.button("保存模板"):
+            if st.button("保存模板", key="save_template"):
 
                 template_path = os.path.join(
                     TEMPLATES_DIR,
@@ -242,21 +221,18 @@ with tab1:
 
             col1.write(t)
 
-            if col2.button("删除", key=t):
+            if col2.button("删除", key=f"delete_{t}"):
 
                 os.remove(os.path.join(TEMPLATES_DIR, t))
 
                 st.rerun()
 
 
-# -----------------------------
-# 下拉配置
-# -----------------------------
 with tab2:
 
     st.header("下拉选项配置")
 
-    password = st.text_input("密码", type="password")
+    password = st.text_input("密码", type="password", key="tab2_password")
 
     if password == EXPORT_PASSWORD:
 
@@ -264,7 +240,7 @@ with tab2:
 
         if templates:
 
-            selected_template = st.selectbox("选择模板", templates)
+            selected_template = st.selectbox("选择模板", templates, key="config_template")
 
             columns = get_template_columns(selected_template)
 
@@ -272,11 +248,11 @@ with tab2:
 
             current_config = config.get(selected_template, {})
 
-            col_to_add = st.selectbox("字段", columns)
+            col_to_add = st.selectbox("字段", columns, key="config_column")
 
-            options_input = st.text_area("输入选项")
+            options_input = st.text_area("输入选项", key="options_input")
 
-            if st.button("保存配置"):
+            if st.button("保存配置", key="save_dropdown"):
 
                 opts = parse_dropdown_options(options_input)
 
@@ -291,16 +267,13 @@ with tab2:
                 st.rerun()
 
 
-# -----------------------------
-# 下载模板
-# -----------------------------
 with tab3:
 
     templates = get_template_files()
 
     if templates:
 
-        selected_template = st.selectbox("模板", templates)
+        selected_template = st.selectbox("模板", templates, key="download_template")
 
         columns = get_template_columns(selected_template)
 
@@ -308,7 +281,7 @@ with tab3:
 
         dropdown_config = config.get(selected_template, {})
 
-        if st.button("生成模板"):
+        if st.button("生成模板", key="generate_template"):
 
             temp_file = f"temp_{selected_template}"
 
@@ -323,15 +296,13 @@ with tab3:
                 st.download_button(
                     "下载模板",
                     f,
-                    file_name=selected_template
+                    file_name=selected_template,
+                    key="download_template_btn"
                 )
 
             os.remove(temp_file)
 
 
-# -----------------------------
-# 上传名单
-# -----------------------------
 with tab4:
 
     st.header("上传名单")
@@ -342,12 +313,14 @@ with tab4:
 
         selected_template = st.selectbox(
             "选择模板",
-            templates
+            templates,
+            key="upload_template_select"
         )
 
         uploaded_file = st.file_uploader(
             "上传Excel",
-            type=["xlsx", "xls"]
+            type=["xlsx", "xls"],
+            key="upload_excel"
         )
 
         if uploaded_file:
@@ -391,12 +364,9 @@ with tab4:
             st.success(f"成功提交 {len(df_upload)} 条数据")
 
 
-# -----------------------------
-# 查看导出
-# -----------------------------
 with tab5:
 
-    password = st.text_input("查看密码", type="password")
+    password = st.text_input("查看密码", type="password", key="tab5_password")
 
     if password == EXPORT_PASSWORD:
 
@@ -404,7 +374,7 @@ with tab5:
 
         st.dataframe(df_all, use_container_width=True)
 
-        if st.button("导出Excel"):
+        if st.button("导出Excel", key="export_excel"):
 
             name = f"名单_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
 
@@ -415,5 +385,6 @@ with tab5:
                 st.download_button(
                     "下载",
                     f,
-                    file_name=name
+                    file_name=name,
+                    key="download_export"
                 )
