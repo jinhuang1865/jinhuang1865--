@@ -322,7 +322,6 @@ with tab3:
                             with st.spinner("🔄 正在备份到GitHub..."):
                                 backup_to_github()
                             
-                            st.balloons()
                             st.success(f"✅ 数据提交成功！共导入 {len(df_upload)} 条有效记录")
                             st.dataframe(df_upload.head(10), use_container_width=True)  # 仅展示本次上传数据，避免重复展示
                     
