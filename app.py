@@ -112,7 +112,7 @@ def get_template_columns(template_name):
         st.error(f"读取模板失败: {e}")
         return []
 
-# 从Excel模板提取下拉选项（数据验证规则）
+# 从Excel模板提取下拉选项（核心修复 MultiCellRange 无 min_col 问题）
 def get_dropdown_options_from_template(template_path):
     options_dict = {}
     try:
@@ -120,14 +120,23 @@ def get_dropdown_options_from_template(template_path):
         ws = wb.active
         if ws.data_validations:
             for dv in ws.data_validations.dataValidation:
+                # 修复1：兼容 MultiCellRange 和单个单元格范围
                 cells_range = dv.cells
-                min_col = cells_range.min_col
-                col = min_col
+                # 提取第一个单元格的列索引（解决 MultiCellRange 无 min_col 问题）
+                if hasattr(cells_range, 'min_col'):
+                    col = cells_range.min_col
+                else:
+                    # 取 MultiCellRange 第一个单元格的列
+                    col = list(cells_range)[0][0].col if list(cells_range) else None
+                if not col:
+                    continue
+                
                 # 获取列标题（第一行）
                 title_cell = ws.cell(row=1, column=col)
                 col_name = title_cell.value
                 if not col_name:
                     continue
+                
                 # 解析下拉选项公式
                 formula = dv.formula1
                 options = []
@@ -135,23 +144,30 @@ def get_dropdown_options_from_template(template_path):
                     options_str = formula[1:-1]
                     options = [opt.strip() for opt in options_str.split(',') if opt.strip()]
                 elif formula and '!' in formula:
-                    parts = formula.split('!')
-                    sheet_name = parts[0].strip("'")
-                    range_addr = parts[1]
-                    ref_ws = wb[sheet_name] if sheet_name in wb.sheetnames else ws
-                    min_c, min_r, max_c, max_r = range_boundaries(range_addr)
-                    for row in ref_ws.iter_rows(min_col=min_c, max_col=max_c, min_row=min_r, max_row=max_r):
-                        for cell in row:
-                            if cell.value and str(cell.value).strip():
-                                options.append(str(cell.value).strip())
-                    options = list(dict.fromkeys(options))  # 去重
+                    try:
+                        parts = formula.split('!')
+                        sheet_name = parts[0].strip("'")
+                        range_addr = parts[1]
+                        ref_ws = wb[sheet_name] if sheet_name in wb.sheetnames else ws
+                        # 修复2：统一用 range_boundaries 解析范围，兼容所有格式
+                        min_c, min_r, max_c, max_r = range_boundaries(range_addr)
+                        for row in ref_ws.iter_rows(min_col=min_c, max_col=max_c, min_row=min_r, max_row=max_r):
+                            for cell in row:
+                                if cell.value and str(cell.value).strip():
+                                    options.append(str(cell.value).strip())
+                        options = list(dict.fromkeys(options))  # 去重
+                    except Exception as e:
+                        # 捕获范围解析失败，不中断整体逻辑
+                        st.warning(f"解析 {col_name} 下拉选项范围失败: {str(e)}")
+                        continue
                 if options:
                     options_dict[col_name] = options
     except Exception as e:
-        st.error(f"读取模板下拉选项失败: {e}")
+        # 仅提示警告，不报错，避免影响整体使用
+        st.warning(f"读取模板下拉选项时出现非关键性问题: {str(e)}")
     return options_dict
 
-# 过滤空文字/空行（核心修正）
+# 过滤空文字/空行
 def clean_empty_data(df):
     # 去除全空行
     df = df.dropna(how='all')
@@ -228,7 +244,7 @@ with tab2:
                 key="download_template_btn"
             )
 
-# ---------- 上传名单标签页（核心解决重复提交+空文字问题，修复continue语法错误） ----------
+# ---------- 上传名单标签页（修复所有已知问题） ----------
 with tab3:
     st.header("📤 上传名单")
     templates = get_template_files()
@@ -259,7 +275,7 @@ with tab3:
                     if len(df_upload) == 0:
                         st.warning("⚠️ 上传文件无有效数据（全为空白/空行），请检查后重新上传")
                         st.session_state.uploaded_file_key = current_file_key
-                        pass  # 修复：将continue改为pass，避免语法错误
+                        pass
                     
                     # 检查缺失字段
                     missing_cols = []
