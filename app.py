@@ -261,7 +261,7 @@ with tab2:
                 key="download_template_btn"
             )
 
-# ---------- 上传名单标签页（修复所有已知问题：重复提交/空数据/下拉解析报错） ----------
+# ---------- 上传名单标签页（已强制每个字段非空，并修复下拉解析报错）----------
 with tab3:
     st.header("📤 上传名单")
     templates = get_template_files()
@@ -292,16 +292,28 @@ with tab3:
                     if len(df_upload) == 0:
                         st.warning("⚠️ 上传文件无有效数据（全为空白/空行），请检查后重新上传")
                         st.session_state.uploaded_file_key = current_file_key
-                        pass
+                        st.stop()
                     
-                    # 检查缺失字段
-                    missing_cols = []
-                    if template_cols:
-                        missing_cols = [col for col in template_cols if col not in df_upload.columns]
+                    # 1. 检查缺失字段（模板中的字段在上传文件中是否存在）
+                    missing_cols = [col for col in template_cols if col not in df_upload.columns]
                     if missing_cols:
-                        st.warning(f"⚠️ 文件缺少字段：{', '.join(missing_cols)}")
+                        st.error(f"❌ 文件缺少必要字段：{', '.join(missing_cols)}，请使用正确的模板填写")
+                        st.session_state.uploaded_file_key = current_file_key
+                        st.stop()
                     
-                    # 验证下拉选项合法性
+                    # 2. 检查空值（每个字段都必须有内容）
+                    empty_cols = []
+                    for col in template_cols:
+                        if col in df_upload.columns:
+                            # 判断是否包含空值（NaN或空字符串）
+                            if df_upload[col].isna().any() or (df_upload[col].astype(str).str.strip() == '').any():
+                                empty_cols.append(col)
+                    if empty_cols:
+                        st.error(f"❌ 以下字段存在空值，请填写完整后再上传：{', '.join(empty_cols)}")
+                        st.session_state.uploaded_file_key = current_file_key
+                        st.stop()
+                    
+                    # 3. 验证下拉选项合法性
                     invalid_options = []
                     if dropdown_options:
                         for col, options in dropdown_options.items():
@@ -314,36 +326,37 @@ with tab3:
                     if invalid_options:
                         st.error(f"❌ 下拉选项验证失败：{'; '.join(invalid_options)}")
                         st.info("💡 请确保所有值均来自模板定义的下拉列表")
-                    else:
-                        # 仅当有有效数据时才执行后续逻辑
-                        if len(df_upload) > 0:
-                            st.success("✅ 下拉选项验证通过！")
-                            # 添加系统元数据列
-                            df_upload["模板名称"] = selected_template
-                            df_upload["提交时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            
-                            # 读取本地已有数据，合并并去重
-                            df_existing = pd.read_csv(DATA_FILE, encoding="utf-8-sig")
-                            df_combined = pd.concat([df_existing, df_upload], ignore_index=True)
-                            # 按工号/姓名去重（保留最新提交）
-                            if "工号" in df_combined.columns:
-                                df_combined = df_combined.drop_duplicates(subset=["工号"], keep="last")
-                            elif "姓名" in df_combined.columns:
-                                df_combined = df_combined.drop_duplicates(subset=["姓名"], keep="last")
-                            
-                            # 仅保存一次合并后的数据（解决重复写入）
-                            df_combined.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
-                            # 执行本地CSV备份
-                            backup_to_local_csv(df_combined)
-                            # 执行GitHub备份
-                            with st.spinner("🔄 正在备份到GitHub..."):
-                                backup_to_github()
-                            
-                            st.success(f"✅ 数据提交成功！共导入 {len(df_upload)} 条有效记录")
-                            st.dataframe(df_upload.head(10), use_container_width=True)  # 仅展示本次上传数据
+                        st.session_state.uploaded_file_key = current_file_key
+                        st.stop()
+                    
+                    # 所有验证通过，执行保存
+                    # 添加系统元数据列
+                    df_upload["模板名称"] = selected_template
+                    df_upload["提交时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    # 读取本地已有数据，合并并去重
+                    df_existing = pd.read_csv(DATA_FILE, encoding="utf-8-sig")
+                    df_combined = pd.concat([df_existing, df_upload], ignore_index=True)
+                    # 按工号/姓名去重（保留最新提交）
+                    if "工号" in df_combined.columns:
+                        df_combined = df_combined.drop_duplicates(subset=["工号"], keep="last")
+                    elif "姓名" in df_combined.columns:
+                        df_combined = df_combined.drop_duplicates(subset=["姓名"], keep="last")
+                    
+                    # 仅保存一次合并后的数据（解决重复写入）
+                    df_combined.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
+                    # 执行本地CSV备份
+                    backup_to_local_csv(df_combined)
+                    # 执行GitHub备份
+                    with st.spinner("🔄 正在备份到GitHub..."):
+                        backup_to_github()
+                    
+                    st.success(f"✅ 数据提交成功！共导入 {len(df_upload)} 条有效记录")
+                    st.dataframe(df_upload.head(10), use_container_width=True)  # 仅展示本次上传数据
                     
                     # 更新session_state，标记当前文件已处理
                     st.session_state.uploaded_file_key = current_file_key
+                    
                 except Exception as e:
                     st.error(f"❌ 文件处理失败：{str(e)}")
             else:
