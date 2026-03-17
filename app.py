@@ -374,14 +374,27 @@ with tab4:
         if len(df_all) == 0:
             st.warning("⚠️ 暂无提交数据")
         else:
-            # 按模板筛选数据
+            # ── 按模板筛选数据 ────────────────────────────────────
+            template_filter = "全部数据"
             if "模板名称" in df_all.columns:
-                template_filter = st.selectbox("📊 按模板筛选", ["全部数据"] + list(df_all["模板名称"].unique()), key="template_filter")
+                template_filter = st.selectbox(
+                    "📊 按模板筛选",
+                    ["全部数据"] + list(df_all["模板名称"].unique()),
+                    key="template_filter"
+                )
                 if template_filter != "全部数据":
-                    df_all = df_all[df_all["模板名称"] == template_filter]
+                    df_all = df_all[df_all["模板名称"] == template_filter].reset_index(drop=True)
+
+            # ── 修复：按所选模板严格过滤表头列 ───────────────────
+            # 当选定了某个模板时，只保留该模板对应的列 + 提交时间 + 模板名称
+            if template_filter != "全部数据":
+                template_cols = get_template_columns(template_filter)
+                # 保留模板列 + 系统列（提交时间、模板名称），去掉其他模板带来的多余列
+                keep_cols = ["提交时间", "模板名称"] + template_cols
+                keep_cols = [c for c in keep_cols if c in df_all.columns]
+                df_all = df_all[keep_cols]
 
             # ── 数据统计指标 ──────────────────────────────────────
-            # 计算二级部门数量（优先找"二级部门"列，其次找包含"部门"的列）
             dept_col = None
             if "二级部门" in df_all.columns:
                 dept_col = "二级部门"
@@ -399,15 +412,11 @@ with tab4:
                 col3.metric("部门数量", "—")
             col4.metric("最新提交", df_all["提交时间"].max() if "提交时间" in df_all.columns else "N/A")
 
-            # ── 数据表格 + 删除功能 ───────────────────────────────
+            # ── 数据表格 ──────────────────────────────────────────
             st.markdown("---")
             st.subheader("📋 数据列表")
 
-            # 初始化删除状态
-            if "delete_indices" not in st.session_state:
-                st.session_state.delete_indices = []
-
-            # 给 df_all 加一个显示用的序号列（从1开始，避免重复插入）
+            # 生成带序号的显示表格（避免重复插入序号列）
             df_display = df_all.reset_index(drop=True)
             if "序号" in df_display.columns:
                 df_display = df_display.drop(columns=["序号"])
@@ -415,40 +424,31 @@ with tab4:
 
             st.dataframe(df_display, use_container_width=True, height=400)
 
-            # 删除记录区域
+            # ── 删除记录区域 ──────────────────────────────────────
             st.markdown("#### 🗑️ 删除记录")
-            st.caption("输入要删除的序号（可输入多个，用英文逗号分隔，例如：1,3,5）")
 
-            delete_input = st.text_input("要删除的序号", placeholder="例如：1,3,5", key="delete_input")
+            del_tab1, del_tab2 = st.tabs(["按序号删除（单条/多条）", "按范围批量删除"])
 
-            col_del1, col_del2 = st.columns([1, 5])
-            with col_del1:
-                if st.button("🗑️ 确认删除", key="confirm_delete"):
+            # ---- 单条/多条删除 ----
+            with del_tab1:
+                st.caption("输入要删除的序号，多个用英文逗号分隔，例如：1,3,5")
+                delete_input = st.text_input("要删除的序号", placeholder="例如：1,3,5", key="delete_input")
+                if st.button("🗑️ 确认删除", key="confirm_delete_single"):
                     if delete_input.strip():
                         try:
-                            # 解析序号（用户输入从1开始，转为0开始的索引）
                             input_nums = [int(x.strip()) for x in delete_input.split(",") if x.strip()]
                             indices_to_delete = [n - 1 for n in input_nums if 1 <= n <= len(df_display)]
-
                             if not indices_to_delete:
                                 st.error("❌ 未找到有效序号，请检查输入")
                             else:
-                                # 读取完整原始数据（未被筛选过滤的）
                                 df_origin = pd.read_csv(DATA_FILE, encoding="utf-8-sig")
-
-                                # 找到被筛选后的行在原始数据中的真实索引
                                 filtered_real_indices = df_all.index.tolist()
                                 real_indices_to_delete = [filtered_real_indices[i] for i in indices_to_delete]
-
-                                # 删除对应行
                                 df_origin = df_origin.drop(index=real_indices_to_delete).reset_index(drop=True)
-
-                                # 保存
                                 df_origin.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
                                 backup_to_local_csv(df_origin)
                                 with st.spinner("🔄 正在同步到GitHub..."):
                                     backup_to_github()
-
                                 st.success(f"✅ 已成功删除 {len(real_indices_to_delete)} 条记录")
                                 st.rerun()
                         except ValueError:
@@ -456,9 +456,77 @@ with tab4:
                     else:
                         st.warning("⚠️ 请先输入要删除的序号")
 
+            # ---- 范围批量删除 ----
+            with del_tab2:
+                st.caption("输入起止序号范围，例如：1-10，将删除序号1至10的全部数据")
+                range_input = st.text_input("序号范围", placeholder="例如：1-10", key="delete_range_input")
+
+                # 初始化确认状态
+                if "batch_delete_confirm" not in st.session_state:
+                    st.session_state.batch_delete_confirm = False
+                if "batch_delete_range" not in st.session_state:
+                    st.session_state.batch_delete_range = ""
+
+                col_r1, col_r2 = st.columns([1, 5])
+                with col_r1:
+                    if st.button("🗑️ 批量删除", key="batch_delete_btn"):
+                        if range_input.strip():
+                            try:
+                                parts = range_input.strip().split("-")
+                                if len(parts) != 2:
+                                    raise ValueError
+                                start_num = int(parts[0].strip())
+                                end_num = int(parts[1].strip())
+                                if start_num < 1 or end_num < start_num or end_num > len(df_display):
+                                    st.error(f"❌ 序号范围无效，请输入 1 到 {len(df_display)} 之间的范围")
+                                else:
+                                    # 触发确认弹窗
+                                    st.session_state.batch_delete_confirm = True
+                                    st.session_state.batch_delete_range = f"{start_num}-{end_num}"
+                                    st.rerun()
+                            except ValueError:
+                                st.error("❌ 格式有误，请输入如：1-10 的范围")
+                        else:
+                            st.warning("⚠️ 请先输入序号范围")
+
+                # ── 确认弹窗（用 st.dialog 模拟） ─────────────────
+                if st.session_state.get("batch_delete_confirm", False):
+                    rng = st.session_state.get("batch_delete_range", "")
+                    if rng:
+                        parts = rng.split("-")
+                        s_num, e_num = int(parts[0]), int(parts[1])
+                        count = e_num - s_num + 1
+                        st.warning(
+                            f"⚠️ **即将删除序号 {s_num}-{e_num} 的 {count} 条数据，此操作不可恢复，是否确认？**"
+                        )
+                        c_yes, c_no, _ = st.columns([1, 1, 4])
+                        with c_yes:
+                            if st.button("✅ 确认删除", key="batch_confirm_yes"):
+                                try:
+                                    indices_to_delete = list(range(s_num - 1, e_num))
+                                    df_origin = pd.read_csv(DATA_FILE, encoding="utf-8-sig")
+                                    filtered_real_indices = df_all.index.tolist()
+                                    real_indices_to_delete = [filtered_real_indices[i] for i in indices_to_delete]
+                                    df_origin = df_origin.drop(index=real_indices_to_delete).reset_index(drop=True)
+                                    df_origin.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
+                                    backup_to_local_csv(df_origin)
+                                    with st.spinner("🔄 正在同步到GitHub..."):
+                                        backup_to_github()
+                                    st.session_state.batch_delete_confirm = False
+                                    st.session_state.batch_delete_range = ""
+                                    st.success(f"✅ 已成功批量删除序号 {s_num}-{e_num} 共 {count} 条记录")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"❌ 删除失败：{str(e)}")
+                        with c_no:
+                            if st.button("❌ 取消", key="batch_confirm_no"):
+                                st.session_state.batch_delete_confirm = False
+                                st.session_state.batch_delete_range = ""
+                                st.rerun()
+
             st.markdown("---")
 
-            # ── 导出Excel功能（修复：使用BytesIO内存流）────────────
+            # ── 导出Excel（严格按当前表头导出）──────────────────────
             export_filename = f"数据导出_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
             output = BytesIO()
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
