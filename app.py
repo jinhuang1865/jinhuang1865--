@@ -386,11 +386,16 @@ with tab4:
                     df_all = df_all[df_all["模板名称"] == template_filter].reset_index(drop=True)
 
             # ── 修复：按所选模板严格过滤表头列 ───────────────────
-            # 当选定了某个模板时，只保留该模板对应的列 + 提交时间 + 模板名称
-            if template_filter != "全部数据":
-                template_cols = get_template_columns(template_filter)
-                # 保留模板列 + 系统列（提交时间、模板名称），去掉其他模板带来的多余列
-                keep_cols = ["提交时间", "模板名称"] + template_cols
+            # 当选定了某个模板时，只保留该模板有实际数据的列 + 提交时间 + 模板名称
+            # 直接从已筛选的数据行中判断哪些列有值，不依赖读本地模板文件
+            if template_filter != "全部数据" and len(df_all) > 0:
+                system_cols = ["提交时间", "模板名称"]
+                # 找出除系统列以外，该模板数据中至少有一行非空的列
+                data_cols = [
+                    c for c in df_all.columns
+                    if c not in system_cols and df_all[c].notna().any() and (df_all[c].astype(str).str.strip() != "").any()
+                ]
+                keep_cols = system_cols + data_cols
                 keep_cols = [c for c in keep_cols if c in df_all.columns]
                 df_all = df_all[keep_cols]
 
