@@ -407,8 +407,10 @@ with tab4:
             if "delete_indices" not in st.session_state:
                 st.session_state.delete_indices = []
 
-            # 给 df_all 加一个显示用的序号列（从1开始）
+            # 给 df_all 加一个显示用的序号列（从1开始，避免重复插入）
             df_display = df_all.reset_index(drop=True)
+            if "序号" in df_display.columns:
+                df_display = df_display.drop(columns=["序号"])
             df_display.insert(0, "序号", range(1, len(df_display) + 1))
 
             st.dataframe(df_display, use_container_width=True, height=400)
