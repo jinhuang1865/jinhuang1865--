@@ -427,8 +427,8 @@ with tab3:
         if dropdown_options:
             st.info(f"📝 模板包含下拉选项：{', '.join(dropdown_options.keys())}")
         
-        # 上传前确认提示（加粗显示）
-        st.warning("**上传数据前，请经分管EMT确认！**")
+        # 上传前确认提示（红色字体加粗显示）
+        st.markdown("<p style='color:red; font-weight:bold; font-size:16px;'>！！上传数据前，请经分管EMT确认！</p>", unsafe_allow_html=True)
         
         uploaded_file = st.file_uploader("📄 上传Excel数据文件（支持.xlsx/.xls格式）", type=["xlsx", "xls"], key="upload_excel")
         # 使用session_state管理文件上传状态
