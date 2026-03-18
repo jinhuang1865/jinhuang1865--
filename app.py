@@ -23,6 +23,12 @@ GITHUB_REPO = "jinhuang1865/jinhuang1865--"
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
 
+# 应用启动时：从GitHub恢复模板文件（静默执行，不阻塞页面）
+if "templates_pulled" not in st.session_state:
+    success, msg = pull_templates_from_github()
+    st.session_state.templates_pulled = True
+    # 静默恢复，不在页面上显示消息
+
 # 初始化数据文件（如果不存在）
 if not os.path.exists(DATA_FILE):
     df = pd.DataFrame(columns=["提交时间", "模板名称"])
@@ -32,6 +38,135 @@ if not os.path.exists(DATA_FILE):
 def backup_to_local_csv(df):
     df.to_csv(BACKUP_CSV_FILE, index=False, encoding="utf-8-sig")
     return True
+
+# 获取GitHub API headers
+def get_github_headers():
+    token = os.getenv("GITHUB_TOKEN")
+    if not token:
+        return None
+    return {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.json"
+    }
+
+# 推送单个模板文件到GitHub
+def push_template_to_github(template_filename):
+    try:
+        headers = get_github_headers()
+        if not headers:
+            return False, "未找到 GITHUB_TOKEN"
+        
+        template_path = os.path.join(TEMPLATES_DIR, template_filename)
+        if not os.path.exists(template_path):
+            return False, "本地模板文件不存在"
+        
+        repo = GITHUB_REPO
+        path = f"templates/{template_filename}"
+        url = f"https://api.github.com/repos/{repo}/contents/{path}"
+        
+        # 读取文件内容
+        with open(template_path, "rb") as f:
+            content = base64.b64encode(f.read()).decode()
+        
+        # 获取文件SHA（如果已存在）
+        sha = None
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            sha = r.json()["sha"]
+        elif r.status_code != 404:
+            return False, f"获取GitHub文件失败：{r.text}"
+        
+        # 准备提交数据
+        data = {
+            "message": f"Add/Update template {template_filename} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "content": content,
+            "branch": "main"
+        }
+        if sha:
+            data["sha"] = sha
+        
+        # 提交到GitHub
+        r = requests.put(url, headers=headers, json=data, timeout=15)
+        if r.status_code in [200, 201]:
+            return True, "推送成功"
+        else:
+            return False, f"GitHub API提交失败：{r.status_code}"
+    except Exception as e:
+        return False, str(e)
+
+# 从GitHub删除模板文件
+def delete_template_from_github(template_filename):
+    try:
+        headers = get_github_headers()
+        if not headers:
+            return False, "未找到 GITHUB_TOKEN"
+        
+        repo = GITHUB_REPO
+        path = f"templates/{template_filename}"
+        url = f"https://api.github.com/repos/{repo}/contents/{path}"
+        
+        # 获取文件SHA
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 404:
+            return True, "GitHub上不存在该文件"
+        if r.status_code != 200:
+            return False, f"获取GitHub文件失败：{r.text}"
+        
+        sha = r.json()["sha"]
+        
+        # 删除文件
+        data = {
+            "message": f"Delete template {template_filename} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "sha": sha,
+            "branch": "main"
+        }
+        r = requests.delete(url, headers=headers, json=data, timeout=15)
+        if r.status_code in [200, 204]:
+            return True, "删除成功"
+        else:
+            return False, f"GitHub删除失败：{r.status_code}"
+    except Exception as e:
+        return False, str(e)
+
+# 从GitHub拉取所有模板文件（应用启动时调用）
+def pull_templates_from_github():
+    try:
+        headers = get_github_headers()
+        if not headers:
+            return False, "未找到 GITHUB_TOKEN"
+        
+        repo = GITHUB_REPO
+        path = "templates"
+        url = f"https://api.github.com/repos/{repo}/contents/{path}"
+        
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 404:
+            # templates目录不存在，创建它
+            return True, "GitHub上暂无模板目录"
+        if r.status_code != 200:
+            return False, f"获取模板列表失败：{r.text}"
+        
+        files = r.json()
+        if not isinstance(files, list):
+            return False, "返回数据格式错误"
+        
+        downloaded = 0
+        for file_info in files:
+            if file_info.get("type") == "file" and file_info.get("name", "").endswith(".xlsx"):
+                filename = file_info["name"]
+                download_url = file_info.get("download_url")
+                if download_url:
+                    # 下载文件
+                    r2 = requests.get(download_url, timeout=30)
+                    if r2.status_code == 200:
+                        local_path = os.path.join(TEMPLATES_DIR, filename)
+                        with open(local_path, "wb") as f:
+                            f.write(r2.content)
+                        downloaded += 1
+        
+        return True, f"成功恢复 {downloaded} 个模板"
+    except Exception as e:
+        return False, str(e)
 
 # 备份到GitHub（需要设置环境变量GITHUB_TOKEN）
 def backup_to_github():
@@ -221,10 +356,18 @@ with tab1:
             if st.button("💾 保存模板", key="save_template"):
                 if template_name:
                     original_ext = os.path.splitext(new_template_file.name)[1]
-                    template_path = os.path.join(TEMPLATES_DIR, f"{template_name}{original_ext}")
+                    template_filename = f"{template_name}{original_ext}"
+                    template_path = os.path.join(TEMPLATES_DIR, template_filename)
                     with open(template_path, "wb") as f:
                         f.write(new_template_file.getbuffer())
-                    st.success(f"✅ 模板 '{template_name}' 保存成功！")
+                    
+                    # 同步推送到GitHub
+                    with st.spinner("🔄 正在同步到GitHub..."):
+                        success, msg = push_template_to_github(template_filename)
+                        if success:
+                            st.success(f"✅ 模板 '{template_name}' 保存成功！（已同步到GitHub）")
+                        else:
+                            st.warning(f"⚠️ 模板已保存到本地，但GitHub同步失败：{msg}")
                     st.rerun()
                 else:
                     st.error("❌ 请输入模板名称")
@@ -236,8 +379,15 @@ with tab1:
                 col1, col2 = st.columns([4, 1])
                 col1.write(f"📄 {t}")
                 if col2.button("🗑️ 删除", key=f"delete_{t}"):
+                    # 先删除本地文件
                     os.remove(os.path.join(TEMPLATES_DIR, t))
-                    st.success(f"✅ 删除 {t}")
+                    # 同步从GitHub删除
+                    with st.spinner("🔄 正在同步删除到GitHub..."):
+                        success, msg = delete_template_from_github(t)
+                        if success:
+                            st.success(f"✅ 删除 {t}（已同步删除GitHub版本）")
+                        else:
+                            st.warning(f"⚠️ 本地已删除，但GitHub同步删除失败：{msg}")
                     st.rerun()
         else:
             st.info("暂无模板")
