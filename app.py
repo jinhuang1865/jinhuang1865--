@@ -23,12 +23,6 @@ GITHUB_REPO = "jinhuang1865/jinhuang1865--"
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
 
-# 应用启动时：从GitHub恢复模板文件（静默执行，不阻塞页面）
-if "templates_pulled" not in st.session_state:
-    success, msg = pull_templates_from_github()
-    st.session_state.templates_pulled = True
-    # 静默恢复，不在页面上显示消息
-
 # 初始化数据文件（如果不存在）
 if not os.path.exists(DATA_FILE):
     df = pd.DataFrame(columns=["提交时间", "模板名称"])
@@ -329,6 +323,12 @@ def clean_empty_data(df):
     # 重置索引
     df = df.reset_index(drop=True)
     return df
+
+# 应用启动时：从GitHub恢复模板文件（在所有函数定义之后调用）
+if "templates_pulled" not in st.session_state:
+    success, msg = pull_templates_from_github()
+    st.session_state.templates_pulled = True
+    # 静默恢复，不在页面上显示消息
 
 # 主界面设置
 st.title("📊 数据提交系统")
