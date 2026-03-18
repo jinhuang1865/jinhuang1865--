@@ -334,11 +334,11 @@ if "templates_pulled" not in st.session_state:
 st.title("📊 数据提交系统")
 st.markdown("---")
 
-# 功能选项卡（模板管理/数据提交/数据查看/数据导出）
+# 功能选项卡（模板管理/模板下载/数据上传/数据导出）
 tab1, tab2, tab3, tab4 = st.tabs([
     "📁 模板管理",
-    "📥 数据提交",
-    "📋 数据查看",
+    "📥 模板下载",
+    "📋 数据上传",
     "📈 数据导出"
 ])
 
@@ -392,9 +392,9 @@ with tab1:
         else:
             st.info("暂无模板")
 
-# --- 数据提交选项卡 ---
+# --- 模板下载选项卡 ---
 with tab2:
-    st.header("📥 数据提交")
+    st.header("📥 模板下载")
     templates = get_template_files()
     if not templates:
         st.warning("⚠️ 暂无可用模板")
@@ -412,9 +412,9 @@ with tab2:
                 key="download_template_btn"
             )
 
-# --- 数据查看选项卡 ---
+# --- 数据上传选项卡 ---
 with tab3:
-    st.header("📋 数据查看")
+    st.header("📋 数据上传")
     templates = get_template_files()
     if not templates:
         st.warning("⚠️ 暂无可用模板")
